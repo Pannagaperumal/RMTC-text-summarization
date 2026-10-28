@@ -78,8 +78,9 @@ class BackendTests(unittest.TestCase):
             r = backend.summarize(ENGLISH_TEXT, language='kn', explain=True)
         self.assertTrue(r.summary.startswith('[kn]'))
         self.assertTrue(r.explanation.startswith('[kn]'))
-        self.assertEqual(r.keywords_language, 'kn')
-        self.assertTrue(all(k.startswith('[kn]') for k in r.keywords))
+        # Isolated words translate badly, so keywords stay English (and are labelled so).
+        self.assertEqual(r.keywords_language, 'en')
+        self.assertFalse(any(k.startswith('[kn]') for k in r.keywords))
 
     def test_missing_translation_gives_warning_not_garbage(self):
         with mock.patch.object(backend, '_translate_text', return_value=None):
@@ -111,6 +112,13 @@ class BackendTests(unittest.TestCase):
         self.assertLess(min_len, max_len)
         self.assertEqual(backend._generation_lengths(2000, detailed), (120, 400))
 
+    def test_incomplete_generated_sentence_is_dropped(self):
+        drop = backend._drop_incomplete_sentence
+        self.assertEqual(drop("One. Two is complete."), "One. Two is complete.")
+        self.assertEqual(drop("One is complete. Scientists say cutting"), "One is complete.")
+        self.assertEqual(drop('He said "yes." Then he'), 'He said "yes."')
+        self.assertIsNone(drop("no sentence end at all"))
+
     def test_chunking_respects_limit_and_paragraphs(self):
         # Bug #5: long documents used to be truncated to one model input.
         text = ' '.join(f"Sentence number {i} is here." for i in range(200)) + '\n\nSecond paragraph.'
@@ -122,9 +130,23 @@ class BackendTests(unittest.TestCase):
 
     def test_chunked_translation_covers_whole_text(self):
         text = ' '.join(f"Sentence {i}." for i in range(500))
-        out = backend._translate_chunks(text, lambda c: c.upper(), len, 200)
-        self.assertEqual(out, text.upper())
-        self.assertIsNone(backend._translate_chunks(text, lambda c: None, len, 200))
+        upper = lambda chunks: [c.upper() for c in chunks]  # noqa: E731
+        self.assertEqual(backend._translate_chunks(text, upper, len, 200), text.upper())
+        self.assertEqual(backend._translate_chunks(text, upper, len, 200, batch_size=8), text.upper())
+        self.assertIsNone(backend._translate_chunks(text, lambda chunks: [None] * len(chunks), len, 200))
+
+    def test_model_translation_is_one_sentence_per_input(self):
+        # Marian drops sentences when given several at once, so each must be its own input.
+        seen = []
+
+        def batch(chunks):
+            seen.extend(chunks)
+            return chunks
+
+        text = "First sentence here. Second one follows. Third ends it.\n\nNew paragraph."
+        out = backend._translate_chunks(text, batch, len, 400, per_sentence=True, batch_size=8)
+        self.assertEqual(seen, ["First sentence here.", "Second one follows.", "Third ends it.", "New paragraph."])
+        self.assertEqual(out, text)
 
     def test_language_detection(self):
         self.assertEqual(backend._detect_language("Short English text."), 'en')

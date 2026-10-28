@@ -117,8 +117,8 @@ flowchart TD
     T1 -->|failed| W1["⚠ warning: summarize<br/>original text"] --> SPLIT
 
     SPLIT["Split sentences<br/>NLTK punkt / regex incl. । danda"] --> EMB{"Embeddings<br/>available?"}
-    EMB -- "MiniLM (ml extra)" --> MMR
-    EMB -- "TF-IDF (scikit-learn)" --> MMR
+    EMB -->|"MiniLM (ml extra)"| MMR
+    EMB -->|"TF-IDF (scikit-learn)"| MMR
     EMB -- none --> FREQ["Word-frequency scoring"]
     MMR["MMR selection<br/>relevance − λ·redundancy"] --> EXT
     FREQ --> EXT["Extractive summary<br/>(selected sentences, original order)"]
@@ -173,16 +173,11 @@ The result is a `SummaryResult` with `summary`, `explanation`, `keywords`, `keyw
 Maximal Marginal Relevance picks sentences that are close to the document's
 overall meaning but not repetitive:
 
-```mermaid
-flowchart LR
-    A["Sentence vectors E<br/>(normalised)"] --> B["centroid c = mean(E)"]
-    B --> C["relevance_i = cos(E_i, c)"]
-    C --> D["score_i = relevance_i − 0.6 · max_sim(i, selected)"]
-    D --> F["pick argmax score,<br/>update max_sim"]
-    F --> G{"top_k picked?"}
-    G -- no --> D
-    G -- yes --> H["sort picks by<br/>position in document"]
-```
+1. Normalise the sentence vectors and compute the document centroid.
+2. `relevance_i` = cosine similarity of sentence *i* to the centroid.
+3. Repeat `top_k` times: pick the unpicked sentence with the highest
+   `relevance_i − 0.6 · max_similarity(i, already_picked)`.
+4. Return the picks in their original document order.
 
 It is fully deterministic and vectorised with NumPy: one similarity matrix, then
 O(k·n) work per document.
@@ -191,24 +186,14 @@ O(k·n) work per document.
 
 ## Translation (`backend._translate_text`)
 
-```mermaid
-flowchart TD
-    S["text, src → tgt"] --> SAME{"src = tgt?"}
-    SAME -- yes --> RET["return text unchanged"]
-    SAME -- no --> M{"Marian model<br/>for this pair?"}
-    M -- yes --> MT["Marian<br/>en→X: opus-mt-en-{hi,ml,mr,ur,es,fr,de}<br/>en→kn/ta/te: opus-mt-en-dra + >>kan<< …<br/>en→bn/gu/pa: opus-mt-en-inc + >>ben<< …<br/>X→en: opus-mt-mul-en"]
-    M -- no --> ML
-    MT -->|all chunks ok| DONE["translation"]
-    MT -->|failed| ML{"Multilingual model<br/>supports both?"}
-    ML -- yes --> MB["mBART-50 (default)<br/>or NLLB-200"]
-    ML -- no --> ON
-    MB -->|ok| DONE
-    MB -->|failed| ON{"ENABLE_ONLINE_<br/>TRANSLATION?"}
-    ON -- yes --> G["Google Translate<br/>(deep-translator)"]
-    ON -- no --> NONE["None → caller adds warning"]
-    G -->|ok| DONE
-    G -->|failed / rate-limited| NONE
-```
+Backends are tried in order until one succeeds:
+
+1. **Marian** (Helsinki-NLP): a dedicated model per language pair (see table).
+2. **Multilingual model** (`MULTILINGUAL_MODEL`): mBART-50 by default, or NLLB-200.
+3. **Google Translate** via `deep-translator`, if `ENABLE_ONLINE_TRANSLATION` is on.
+
+If all fail, `None` is returned and `summarize()` adds a warning instead of failing.
+Identical source and target languages skip translation.
 
 Each backend translates the **whole text in chunks**: sentences are grouped up to
 400 tokens for models, or 4,500 characters for Google. Line and paragraph breaks are
@@ -230,16 +215,6 @@ tried for the whole text.
 
 ## Model loading, caching and concurrency
 
-```mermaid
-stateDiagram-v2
-    [*] --> NotLoaded
-    NotLoaded --> Loading: first request needs model<br/>(acquire _LOAD_LOCK)
-    Loading --> Ready: from_pretrained OK
-    Loading --> Failed: error (missing package, download failure, OOM)
-    Ready --> Ready: reused by every request
-    Failed --> Failed: fallback used, no retry<br/>(restart the app after fixing)
-```
-
 - Models load lazily and are cached per process. With `LIGHTWEIGHT_MODE=true` they are never loaded.
 - `_LOAD_LOCK` stops concurrent first requests from loading the same multi-GB model twice.
 - The multilingual tokenizer's `src_lang` is shared state, so setting it and encoding happen under `_MULTI_LOCK`.
@@ -249,21 +224,9 @@ stateDiagram-v2
 
 ## PDF export and Indic scripts
 
-ReportLab's built-in fonts cover only Latin-1, so `exporter.py` picks fonts itself:
-
-```mermaid
-flowchart TD
-    T["Text (summary, keywords, …)"] --> ESC["Split on whitespace into words"]
-    ESC --> W{"word contains<br/>Indic / Arabic letters?"}
-    W -- no --> BASE["base font<br/>Noto Sans / DejaVu / Arial / Helvetica"]
-    W -- yes --> F{"font for that script<br/>installed?"}
-    F -- no --> MISS["base font + warning logged<br/>(renders as boxes)"]
-    F -- yes --> COV{"font has glyphs for<br/>every character?"}
-    COV -- yes --> SCR["&lt;font name=RMTC-kannada&gt; word &lt;/font&gt;"]
-    COV -- no --> BASE
-    BASE & SCR & MISS --> XML["XML-escape every run"]
-    XML --> P["Paragraph(shaping=1)<br/>HarfBuzz shapes conjuncts & vowel signs"]
-```
+ReportLab's built-in fonts cover only Latin-1, so `exporter.py` picks fonts itself.
+Each word containing Indic or Arabic letters is wrapped in a `<font>` tag for its script,
+and paragraphs are shaped with HarfBuzz (`uharfbuzz`) so conjuncts render correctly.
 
 - Fonts are found by indexing TTF files in `PDF_FONT_DIR`, `./fonts` and the OS font folders.
   Per script it looks for Noto Sans *Script*, then Nirmala UI, then the old Windows fonts (Tunga, Mangal, Latha …), then Lohit.
@@ -278,18 +241,8 @@ flowchart TD
 
 ## Security model
 
-```mermaid
-flowchart LR
-    REQ["Request"] --> SIZE{"≤ MAX_UPLOAD_MB?"}
-    SIZE -- no --> E413["413"]
-    SIZE -- yes --> A{"AUTH_ENABLED?"}
-    A -- no --> V["View"]
-    A -- yes --> S{"session<br/>logged_in?"}
-    S -- yes --> V
-    S -- "no (page)" --> L["302 → /login?next=…"]
-    S -- "no (/api/*)" --> E401["401 JSON"]
-```
-
+- With `AUTH_ENABLED=true`, pages redirect to `/login` and `/api/*` routes return `401`
+  without a session. Uploads over `MAX_UPLOAD_MB` get `413`.
 - Passwords are checked against a Werkzeug hash (`APP_PASSWORD_HASH`), and the username is compared in
   constant time. After login, `next` only redirects to local paths, which blocks open redirects.
 - `FLASK_SECRET_KEY` must be set for stable, unforgeable sessions. Without it a random key is generated per start.

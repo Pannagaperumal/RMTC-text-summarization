@@ -167,6 +167,7 @@ _NLLB_CODES = {
 
 # Token budgets for model-based translation chunks (Marian max input is 512).
 _MT_CHUNK_TOKENS = 400
+_MT_BATCH_SIZE = 8
 _ONLINE_CHUNK_CHARS = 4500  # Google Translate rejects requests over 5000 chars
 
 _FALLBACK_STOPWORDS = {
@@ -320,12 +321,13 @@ def _is_break(chunk):
     return not chunk.strip() and '\n' in chunk
 
 
-def _chunk_text(text, measure, limit):
+def _chunk_text(text, measure, limit, per_sentence=False):
     """Group sentences into chunks whose measure() stays under limit.
 
-    Over-long sentences are split on whitespace. Line breaks are returned as
-    separate chunks (e.g. '\n' or '\n\n') so translated output keeps the
-    original layout; callers must pass them through untranslated.
+    Over-long sentences are split on whitespace. With per_sentence=True every
+    sentence becomes its own chunk. Line breaks are returned as separate chunks
+    (e.g. '\n' or '\n\n') so translated output keeps the original layout;
+    callers must pass them through untranslated.
     """
     chunks = []
     for block in re.split(r'(\n\s*)', text):
@@ -352,7 +354,7 @@ def _chunk_text(text, measure, limit):
                     pieces.append(part)
             for piece in pieces:
                 candidate = f"{current} {piece}".strip()
-                if current and measure(candidate) > limit:
+                if current and (per_sentence or measure(candidate) > limit):
                     chunks.append(current)
                     current = piece
                 else:
@@ -374,27 +376,32 @@ def _join_chunks(chunks):
     return out.strip()
 
 
-def _translate_chunks(text, translate_one, measure, limit):
-    """Translate text chunk-by-chunk. Returns None if any chunk fails."""
-    chunks = _chunk_text(text, measure, limit)
-    out = []
-    for chunk in chunks:
-        if _is_break(chunk):
-            out.append(chunk)
-            continue
-        translated = translate_one(chunk)
-        if not translated:
+def _translate_chunks(text, translate_batch, measure, limit, per_sentence=False, batch_size=1):
+    """Translate text chunk-by-chunk. Returns None if any chunk fails.
+
+    translate_batch receives a list of up to batch_size chunks and returns a
+    list of translations in the same order.
+    """
+    chunks = _chunk_text(text, measure, limit, per_sentence=per_sentence)
+    todo = [i for i, c in enumerate(chunks) if not _is_break(c)]
+    out = list(chunks)
+    for start in range(0, len(todo), batch_size):
+        idx = todo[start:start + batch_size]
+        translated = translate_batch([chunks[i] for i in idx])
+        if not translated or len(translated) != len(idx) or not all(translated):
             return None
-        out.append(translated)
+        for i, t in zip(idx, translated):
+            out[i] = t
     return _join_chunks(out)
 
 
-def _generate(model, tokenizer, text, **gen_kwargs):
-    encoded = _to_device(tokenizer(text, return_tensors='pt', truncation=True, max_length=512))
+def _generate(model, tokenizer, texts, **gen_kwargs):
+    """Run a seq2seq model on a batch of texts; returns decoded strings."""
+    encoded = _to_device(tokenizer(texts, return_tensors='pt', truncation=True, max_length=512, padding=True))
     n_in = encoded['input_ids'].shape[-1]
     with torch.no_grad():
         out = model.generate(**encoded, max_length=min(1024, 3 * n_in + 32), **gen_kwargs)
-    return tokenizer.decode(out[0], skip_special_tokens=True).strip()
+    return [t.strip() for t in tokenizer.batch_decode(out, skip_special_tokens=True)]
 
 
 def _translate_marian(text, src_lang, tgt_lang):
@@ -409,11 +416,14 @@ def _translate_marian(text, src_lang, tgt_lang):
         return None
     model, tokenizer = loaded
 
-    def one(chunk):
-        return _generate(model, tokenizer, f"{prefix} {chunk}" if prefix else chunk)
+    def batch(chunks):
+        return _generate(model, tokenizer, [f"{prefix} {c}" if prefix else c for c in chunks])
 
     try:
-        return _translate_chunks(text, one, lambda s: len(tokenizer.tokenize(s)), _MT_CHUNK_TOKENS)
+        # One sentence per input: Marian is trained on sentence pairs and drops
+        # content when given several sentences at once.
+        return _translate_chunks(text, batch, lambda s: len(tokenizer.tokenize(s)), _MT_CHUNK_TOKENS,
+                                 per_sentence=True, batch_size=_MT_BATCH_SIZE)
     except Exception as e:
         log.warning("Marian %s->%s failed: %s", src_lang, tgt_lang, e)
         return None
@@ -432,14 +442,15 @@ def _translate_multilingual(text, src_lang, tgt_lang):
     if forced_id is None or forced_id == tokenizer.unk_token_id:
         return None
 
-    def one(chunk):
+    def batch(chunks):
         # src_lang lives on the shared tokenizer; hold the lock across set + encode.
         with _MULTI_LOCK:
             tokenizer.src_lang = src_tag
-            return _generate(model, tokenizer, chunk, forced_bos_token_id=forced_id)
+            return _generate(model, tokenizer, chunks, forced_bos_token_id=forced_id)
 
     try:
-        return _translate_chunks(text, one, lambda s: len(tokenizer.tokenize(s)), _MT_CHUNK_TOKENS)
+        return _translate_chunks(text, batch, lambda s: len(tokenizer.tokenize(s)), _MT_CHUNK_TOKENS,
+                                 per_sentence=True, batch_size=_MT_BATCH_SIZE)
     except Exception as e:
         log.warning("%s %s->%s failed: %s", MULTILINGUAL_MODEL, src_lang, tgt_lang, e)
         return None
@@ -454,7 +465,8 @@ def _translate_online(text, src_lang, tgt_lang):
         translator = GoogleTranslator(source='auto', target=tgt_lang)
 
     try:
-        return _translate_chunks(text, translator.translate, len, _ONLINE_CHUNK_CHARS)
+        return _translate_chunks(text, lambda chunks: [translator.translate(c) for c in chunks],
+                                 len, _ONLINE_CHUNK_CHARS)
     except Exception as e:
         log.warning("Online translation %s->%s failed: %s", src_lang, tgt_lang, e)
         return None
@@ -618,18 +630,6 @@ def _extract_keywords(text, top_n=10):
     return [w for w, _ in collections.Counter(filtered).most_common(top_n)]
 
 
-def _translate_keywords(keywords, tgt_lang):
-    """Translate keywords as one newline-separated block; keep English on mismatch."""
-    if not keywords or tgt_lang == 'en':
-        return keywords, 'en'
-    translated = _translate_text('\n\n'.join(keywords), 'en', tgt_lang)
-    if translated:
-        parts = [p.strip(' .,;،') for p in re.split(r'\n+', translated) if p.strip()]
-        if len(parts) == len(keywords):
-            return parts, tgt_lang
-    return keywords, 'en'
-
-
 def _detect_language(text):
     """Best-effort ISO 639-1 code for text; defaults to English when unsure."""
     sample = text.strip()[:5000]
@@ -676,7 +676,7 @@ def _generation_lengths(n_input_tokens, settings):
     """
     if n_input_tokens < 40:
         return None  # too short to be worth rewriting
-    max_length = max(20, min(settings['max_length'], int(n_input_tokens * 0.9)))
+    max_length = max(20, min(settings['max_length'], n_input_tokens))
     min_length = min(settings['min_length'], int(max_length * 0.6))
     return min_length, max_length
 
@@ -703,7 +703,20 @@ def _abstractive_rewrite(text, settings):
             no_repeat_ngram_size=3,
             early_stopping=True,
         )
-    return tokenizer.decode(ids[0], skip_special_tokens=True, clean_up_tokenization_spaces=True).strip()
+    return _drop_incomplete_sentence(tokenizer.decode(ids[0], skip_special_tokens=True).strip())
+
+
+def _drop_incomplete_sentence(text):
+    """Remove a trailing sentence fragment left when generation hits max_length.
+
+    Translation models hallucinate badly when given a fragment, so it is better
+    to lose the fragment. Returns None if no complete sentence remains.
+    """
+    text = text.strip()
+    if not text or re.search(r'[.!?\u0964]["\')\]]*$', text):
+        return text or None
+    ends = list(re.finditer(r'[.!?\u0964]["\')\]]*(?=\s)', text))
+    return text[:ends[-1].end()] if ends else None
 
 
 def _build_explanation(sentences, selected, scores, summary, mode):
@@ -807,12 +820,11 @@ def summarize(text, language='en', explain=False, summary_mode=None):
             summary = translated_summary
             if explanation:
                 explanation = _translate_text(explanation, working_lang, language) or explanation
-            keywords, result.keywords_language = _translate_keywords(keywords, language)
         else:
             result.warnings.append(
                 f"Translation to '{language}' is not available right now; showing the summary in "
                 f"{'English' if working_lang == 'en' else working_lang}. Install the translation "
-                "models (requirements-ml.txt) or enable online translation.")
+                "models (uv sync --extra ml) or enable online translation.")
 
     result.summary = summary
     result.explanation = explanation
