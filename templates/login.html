@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+    <style>
+        body {
+            background: linear-gradient(120deg, #2980b9, #6dd5fa, #ffffff);
+            height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            background: #e3f2fd;
+            padding: 2.5rem 2rem 2rem 2rem;
+            border-radius: 18px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.2);
+            width: 350px;
+            text-align: center;
+        }
+        .login-container h2 {
+            margin-bottom: 1.5rem;
+            color: #2980b9;
+            font-size: 2.2rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+        .login-container label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #222;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        .login-container input[type="text"],
+        .login-container input[type="password"] {
+            width: 90%;
+            padding: 0.7rem;
+            margin-bottom: 1.2rem;
+            border: 1.5px solid #2980b9;
+            border-radius: 8px;
+            font-size: 1rem;
+            outline: none;
+            transition: border 0.2s;
+        }
+        .login-container input[type="text"]:focus,
+        .login-container input[type="password"]:focus {
+            border: 2px solid #6dd5fa;
+        }
+        .login-container input[type="submit"] {
+            width: 100%;
+            padding: 0.8rem;
+            background: linear-gradient(90deg, #2980b9, #6dd5fa);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(41,128,185,0.15);
+            transition: background 0.2s, transform 0.1s;
+        }
+        .login-container input[type="submit"]:hover {
+            background: linear-gradient(90deg, #6dd5fa, #2980b9);
+            transform: translateY(-2px) scale(1.03);
+        }
+        .error-message {
+            color: #e74c3c;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            font-size: 1.05rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h2>Login</h2>
+        {% if error %}
+            <div class="error-message">{{ error }}</div>
+        {% endif %}
+        <form method="post">
+            <label>Username:</label>
+            <input type="text" name="username" required>
+            <label>Password:</label>
+            <input type="password" name="password" required>
+            <input type="submit" value="Login">
+        </form>
+    </div>
+</body>
+</html>

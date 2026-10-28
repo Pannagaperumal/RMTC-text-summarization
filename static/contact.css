@@ -1,0 +1,116 @@
+body {
+    height: 100%;
+    width: 100%;
+}
+
+.main {
+    display: flex;
+    flex-direction: row;
+    height: 100vh;
+    width: 100vw;
+    padding: 0;
+}
+
+body::-webkit-scrollbar {
+    display: none;
+}
+
+.ts {
+    height: 20vh;
+    width: 80vw;
+    border: 0.1rem solid rgb(63, 59, 59);
+    margin-left: 0;
+    /* margin-right: 10%; */
+    background-color: gold;
+    border-radius: 0.5rem;
+    padding-top: 1.5rem;
+}
+
+h1 {
+    text-align: center;
+    font-family: Georgia, "Times New Roman", Times, serif;
+}
+
+.tag {
+    text-align: center;
+    font-family: Georgia, "Times New Roman", Times, serif;
+}
+
+.menu {
+    display: flex;
+    height: 100%;
+    width: 10vw;
+    border: 0.1rem solid grey;
+    border-radius: 0.5rem;
+    margin-left: 0;
+    text-align: start;
+    flex-direction: column;
+    /* padding-left: 1.5rem; */
+    font-family: Georgia, "Times New Roman", Times, serif;
+    font-weight: 500;
+    position: relative;
+    background-color: whitesmoke;
+}
+
+.m1 {
+    padding-left: 10%;
+    margin-top: 25%;
+    /* background-color: bisque; */
+}
+
+.m1 a {
+    text-decoration: none;
+    color: black;
+}
+
+.MC {
+    width: 80%;
+}
+
+.right {
+    width: 5%;
+}
+
+.main1 {
+    width: 80vw;
+    height: 50%;
+    overflow: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+}
+
+.main1::-webkit-scrollbar {
+    display: none;
+}
+
+.sub {
+    width: 20%;
+    /* margin-left: 10%;
+  margin-right: 10%; */
+    margin-top: 5%;
+    margin-right: 5%;
+}
+
+.sub img {
+    background-size: contain;
+    height: 11rem;
+    width: 95%;
+    border-top-left-radius: 0.95rem;
+    border-top-right-radius: 0.95rem;
+    padding-bottom: 0.7rem;
+}
+
+.ad {
+    width: 10vw;
+    border: 0.1rem solid grey;
+    border-radius: 0.5rem;
+    text-align: center;
+    padding-top: 40vh;
+    font-size: 2rem;
+}
+
+.ad p {
+    opacity: 0.1;
+}

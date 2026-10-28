@@ -1,0 +1,124 @@
+body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: Georgia, "Times New Roman", Times, serif;
+    background-color: #ffffff;
+}
+
+.main {
+    display: flex;
+    flex-direction: row;
+    min-height: 100vh;
+}
+
+.menu {
+    display: flex;
+    width: 12vw;
+    min-width: 120px;
+    border-right: 1px solid #ddd;
+    flex-direction: column;
+    font-family: Georgia, "Times New Roman", Times, serif;
+    font-weight: 500;
+    position: relative;
+    background-color: #ffffff;
+    padding-top: 1rem;
+}
+
+.m1 {
+    padding-left: 1.5rem;
+    margin-top: 1.8rem;
+    font-size: 1rem;
+}
+
+.m1 a {
+    text-decoration: none;
+    color: #333333;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+.m1 a:hover {
+    color: #117a65;
+}
+
+.last {
+    margin-top: auto;
+    margin-bottom: 2rem;
+    padding-left: 1.5rem;
+}
+
+.last a {
+    color: #333333;
+    font-weight: bold;
+}
+
+.MC {
+    flex: 1;
+    padding: 2rem 2.5rem;
+}
+
+/* Dark Teal Header Banner matching screenshot */
+.ts {
+    width: 100%;
+    background-color: #117a65; /* Dark Teal */
+    color: #ffffff;
+    border-radius: 12px;
+    padding: 2.2rem 1.5rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.ts h1 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 2.5rem;
+    color: #ffffff;
+    margin-bottom: 0.4rem;
+    font-weight: normal;
+}
+
+.ts .tag {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.1rem;
+    color: #ffffff;
+    margin-bottom: 0.4rem;
+}
+
+.ts .mode-tag {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1rem;
+    color: #ffffff;
+    margin-bottom: 0;
+}
+
+/* Scrollable Text Box Cards matching screenshot */
+.textbox-card {
+    border: 1px solid #cccccc;
+    border-radius: 8px;
+    background-color: #ffffff;
+    padding: 20px;
+    height: 380px;
+    overflow-y: auto;
+    text-align: justify;
+    line-height: 1.6;
+    font-family: Georgia, "Times New Roman", Times, serif;
+    font-size: 1rem;
+    color: #222222;
+}
+
+.orignaltxt, .summaryTxt {
+    width: 100%;
+    margin-bottom: 0;
+}
+
+.btn-danger {
+    background-color: #d9534f;
+    border-color: #d9534f;
+}
+
+.ad {
+    width: 0;
+    display: none;
+}

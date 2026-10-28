@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Text Summarization - Document Summaries</title>
+  <link
+    rel="stylesheet"
+    href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+    integrity="sha384-Gn5384xqQ1aok/XA+B58RXPxPg6fy4IwvTNh@E263XmFc315Aw1GgFAW/dA1563Xm"
+    crossorigin="anonymous"
+  />
+  <link rel="stylesheet" href="static/styles.css" />
+  <script>
+    let speech = null;
+    let isPaused = false;
+    let targetLang = "{{ language | default('kn') }}";
+    let activePlayBtn = null;
+
+    const SPEECH_LANG_MAP = {
+      'en': 'en-US',
+      'kn': 'kn-IN',
+      'hi': 'hi-IN',
+      'bn': 'bn-IN',
+      'ta': 'ta-IN',
+      'te': 'te-IN',
+      'ml': 'ml-IN',
+      'mr': 'mr-IN',
+      'gu': 'gu-IN',
+      'pa': 'pa-IN',
+      'ur': 'ur-PK',
+      'es': 'es-ES',
+      'fr': 'fr-FR',
+      'de': 'de-DE'
+    };
+
+    async function playSummary(idx = 0) {
+      const summaryEls = document.querySelectorAll(".summaryTxt");
+      const targetEl = summaryEls[idx] || summaryEls[0];
+      if (!targetEl) return;
+
+      const summaryText = targetEl.textContent.trim();
+      if (!summaryText) {
+        alert("No summarized text to read!");
+        return;
+      }
+
+      stopSpeech();
+
+      const bcp47Lang = SPEECH_LANG_MAP[targetLang] || targetLang;
+      const playBtns = document.querySelectorAll(".btn-play-voice");
+      activePlayBtn = playBtns[idx] || playBtns[0];
+
+      const voices = (window.speechSynthesis && window.speechSynthesis.getVoices()) || [];
+      const matchingVoice = voices.find(v => v.lang.toLowerCase() === bcp47Lang.toLowerCase() || v.lang.toLowerCase().startsWith(targetLang.toLowerCase()));
+
+      if (matchingVoice && targetLang === 'en') {
+        speech = new SpeechSynthesisUtterance(summaryText);
+        speech.lang = bcp47Lang;
+        speech.voice = matchingVoice;
+        speech.rate = 0.95;
+        if (activePlayBtn) activePlayBtn.innerText = "Speaking...";
+        speech.onend = () => { if (activePlayBtn) activePlayBtn.innerText = "Play"; };
+        window.speechSynthesis.speak(speech);
+      } else {
+        try {
+          if (activePlayBtn) activePlayBtn.innerText = "Loading Voice...";
+
+          const res = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: summaryText, language: targetLang })
+          });
+
+          if (!res.ok) throw new Error("Voice synthesis failed");
+
+          const blob = await res.blob();
+          const audioUrl = URL.createObjectURL(blob);
+
+          let audioEl = document.getElementById("audioPlayer");
+          if (!audioEl) {
+            audioEl = document.createElement("audio");
+            audioEl.id = "audioPlayer";
+            document.body.appendChild(audioEl);
+          }
+
+          audioEl.src = audioUrl;
+          audioEl.onended = () => {
+            if (activePlayBtn) activePlayBtn.innerText = "Play";
+          };
+
+          await audioEl.play();
+          if (activePlayBtn) activePlayBtn.innerText = "Speaking...";
+        } catch (err) {
+          console.warn("Backend TTS failed, using browser fallback:", err);
+          speech = new SpeechSynthesisUtterance(summaryText);
+          speech.lang = bcp47Lang;
+          speech.onend = () => { if (activePlayBtn) activePlayBtn.innerText = "Play"; };
+          window.speechSynthesis.speak(speech);
+        }
+      }
+    }
+
+    function stopSpeech() {
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+
+      const audioEl = document.getElementById("audioPlayer");
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.currentTime = 0;
+      }
+
+      document.querySelectorAll(".btn-play-voice").forEach(btn => btn.innerText = "Play");
+      isPaused = false;
+    }
+  </script>
+</head>
+<body>
+  <div class="main">
+    <div class="menu">
+      <div class="m1">
+        <a href="static/home.html">HOME</a>
+      </div>
+      <div class="m1">
+        <a href="static/about.html">ABOUT</a>
+      </div>
+      <div class="m1">
+        <a href="static/contact.html">CONTACT</a>
+      </div>
+      <div class="last m1">
+        <a href="/index">&larr;BACK</a>
+      </div>
+    </div>
+
+    <div class="MC">
+      <!-- Dark Teal Header Banner matching screenshot -->
+      <div class="ts">
+        <h1>Text Summarization</h1>
+        <p class="tag">Retrieve separate summaries for each input document</p>
+        <p class="mode-tag">Mode: {{ summary_mode | default('detailed') }} | Language: {{ language_name | default('Kannada') }}</p>
+      </div>
+
+      <div class="container-fluid" style="padding-left: 30px; padding-right: 30px;">
+
+        {% if error %}
+          <div class="alert alert-danger" role="alert">
+            {{ error }}
+          </div>
+        {% endif %}
+
+        {% set docs_list = doc_results if doc_results else [{'doc_name': 'Document Output', 'original_text': original_text, 'summary': summary, 'keywords': keywords, 'explanation': explanation}] %}
+
+        {% for item in docs_list %}
+          <div class="doc-card-block mb-5 p-4 rounded bg-white shadow-sm" style="border: 2px solid #117a65;">
+            
+            <!-- Document Title Header -->
+            <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
+              <h4 class="font-weight-bold mb-0" style="color: #117a65; font-family: Georgia, serif;">
+                📄 {{ item.doc_name }}
+              </h4>
+              <span class="badge badge-info p-2" style="font-size: 0.9rem;">Document {{ loop.index }} of {{ docs_list | length }}</span>
+            </div>
+
+            <!-- Subheaders matching screenshot -->
+            <div class="row align-items-center mb-3">
+              <div class="col-6 text-center">
+                <h5 class="font-weight-bold mb-0" style="font-family: Georgia, serif;">Original Text</h5>
+              </div>
+              <div class="col-6 d-flex justify-content-between align-items-center px-3">
+                <h5 class="font-weight-bold mb-0 mx-auto" style="font-family: Georgia, serif; margin-left: 20% !important;">Summary Text</h5>
+                <div>
+                  <button class="btn btn-light border mr-2 font-weight-bold btn-play-voice" onclick="playSummary({{ loop.index0 }})">Play</button>
+                  <button class="btn btn-danger font-weight-bold" onclick="stopSpeech()">Stop</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Side-by-side scrollable text boxes matching screenshot -->
+            <div class="row">
+              <div class="col-6">
+                <div class="textbox-card">
+                  <div class="orignaltxt ot">{{ item.original_text }}</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="textbox-card">
+                  <div class="summaryTxt st">{{ item.summary }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Dedicated Action Buttons for this specific document -->
+            <div class="text-center my-4">
+              <button class="btn btn-success mx-1 font-weight-bold" onclick="downloadTXT({{ loop.index0 }}, '{{ item.doc_name }}')">Export as TXT</button>
+              <button class="btn btn-primary mx-1 font-weight-bold" onclick="downloadWord({{ loop.index0 }}, '{{ item.doc_name }}')">Export as Word</button>
+              <button class="btn btn-info mx-1 font-weight-bold" onclick="downloadPDF({{ loop.index0 }}, '{{ item.doc_name }}')">Export as PDF</button>
+              <button class="btn btn-warning mx-1 font-weight-bold" onclick="copyToClipboard({{ loop.index0 }})">Copy to Clipboard</button>
+            </div>
+
+            {% if item.keywords %}
+              <div class="my-3 p-3 bg-light rounded border">
+                <h6 class="font-weight-bold">Extracted Keywords:</h6>
+                <p class="mb-0 text-primary font-weight-bold">{{ item.keywords | join(', ') }}</p>
+              </div>
+            {% endif %}
+
+            {% if item.explanation %}
+              <div class="my-3 p-3 bg-light rounded border">
+                <h6 class="font-weight-bold">Detailed Explanation:</h6>
+                <p class="mb-0" style="white-space: pre-wrap;">{{ item.explanation }}</p>
+              </div>
+            {% endif %}
+
+          </div>
+        {% endfor %}
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function getUniqueFilename(ext, docName = 'doc') {
+      const safeName = docName.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20);
+      const now = new Date();
+      const dateStr = now.getFullYear() +
+                      String(now.getMonth() + 1).padStart(2, '0') +
+                      String(now.getDate()).padStart(2, '0') + '_' +
+                      String(now.getHours()).padStart(2, '0') +
+                      String(now.getMinutes()).padStart(2, '0') +
+                      String(now.getSeconds()).padStart(2, '0');
+      return `${safeName}_summary_${dateStr}.${ext}`;
+    }
+
+    function downloadTXT(idx = 0, docName = 'doc') {
+      const summaryEls = document.querySelectorAll('.summaryTxt');
+      const summary = (summaryEls[idx] || summaryEls[0]).textContent;
+      const blob = new Blob([summary], { type: 'text/plain;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = getUniqueFilename('txt', docName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    async function downloadWord(idx = 0, docName = 'doc') {
+      const summaryEls = document.querySelectorAll('.summaryTxt');
+      const origEls = document.querySelectorAll('.orignaltxt');
+
+      const summary = (summaryEls[idx] || summaryEls[0]).textContent;
+      const originalText = (origEls[idx] || origEls[0]) ? (origEls[idx] || origEls[0]).textContent : "";
+
+      try {
+        const response = await fetch('/api/download/docx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            summary: summary,
+            original_text: originalText,
+            language_name: "{{ language_name | default('Output') }}",
+            keywords: [],
+            explanation: ""
+          })
+        });
+
+        if (!response.ok) throw new Error("DOCX generation failed");
+
+        const blob = await response.blob();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = getUniqueFilename('docx', docName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (err) {
+        const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body>";
+        const footer = "</body></html>";
+        const sourceHTML = header + '<h2>Summary Result - ' + docName + '</h2><p>' + summary.replace(/\n/g, '<br>') + '</p>' + footer;
+        const blob = new Blob(['\ufeff', sourceHTML], { type: 'application/msword' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = getUniqueFilename('doc', docName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    }
+
+    async function downloadPDF(idx = 0, docName = 'doc') {
+      const summaryEls = document.querySelectorAll('.summaryTxt');
+      const origEls = document.querySelectorAll('.orignaltxt');
+
+      const summary = (summaryEls[idx] || summaryEls[0]).textContent;
+      const originalText = (origEls[idx] || origEls[0]) ? (origEls[idx] || origEls[0]).textContent : "";
+
+      try {
+        const response = await fetch('/api/download/pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            summary: summary,
+            original_text: originalText,
+            language_name: "{{ language_name | default('Output') }}",
+            keywords: [],
+            explanation: ""
+          })
+        });
+
+        if (!response.ok) throw new Error("PDF generation failed");
+
+        const blob = await response.blob();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = getUniqueFilename('pdf', docName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (err) {
+        if (typeof window.jspdf !== 'undefined' || typeof window.jsPDF !== 'undefined') {
+          const doc = new (window.jspdf || window.jsPDF)();
+          doc.setFontSize(14);
+          doc.text('Summary Output - ' + docName, 10, 10);
+          doc.setFontSize(11);
+          const splitText = doc.splitTextToSize(summary, 180);
+          doc.text(splitText, 10, 20);
+          doc.save(getUniqueFilename('pdf', docName));
+        } else {
+          alert('PDF generation error: ' + err.message);
+        }
+      }
+    }
+
+    function copyToClipboard(idx = 0) {
+      const summaryEls = document.querySelectorAll('.summaryTxt');
+      const summary = (summaryEls[idx] || summaryEls[0]).textContent;
+      navigator.clipboard.writeText(summary).then(function() {
+        alert('Summary copied to clipboard!');
+      }, function(err) {
+        alert('Failed to copy: ' + err);
+      });
+    }
+  </script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</body>
+</html>

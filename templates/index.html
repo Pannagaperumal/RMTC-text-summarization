@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Text Summarization - Input</title>
+    <link
+      rel="stylesheet"
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+      integrity="sha384-Gn5384xqQ1aok/XA+B58RXPxPg6fy4IwvTNh@E263XmFc315Aw1GgFAW/dA1563Xm"
+      crossorigin="anonymous"
+    />
+
+    <link rel="stylesheet" href="static/styles.css" />
+  </head>
+  <body>
+    <div class="main">
+      <div class="menu">
+        <div class="m1">
+          <a href="static/home.html">HOME</a>
+        </div>
+        <div class="m1">
+          <a href="static/about.html">ABOUT</a>
+        </div>
+        <div class="m1">
+          <a href="static/contact.html">CONTACT</a>
+        </div>
+      </div>
+      <div class="MC">
+        <div class="ts">
+          <div>
+            <h1>Text Summarization</h1>
+          </div>
+          <div>
+            <p class="tag">Retrieve the best summary for the text in your target language</p>
+          </div>
+        </div>
+        <div class="i1">
+          <form action="/analyze" method="POST" enctype="multipart/form-data">
+            <textarea
+              style="text-align: justify; border: 2px solid #333; border-radius: 8px; font-weight: bold; background: #fff; font-size: 1.1rem; margin-bottom: 1rem;"
+              name="rawtext"
+              class="form-control"
+              rows="4"
+              placeholder="Enter your raw text or upload documents below"
+            ></textarea>
+            
+            <div class="form-group mt-2">
+              <label for="language" style="font-weight: bold;">Select Output Language:</label>
+              <select name="language" id="language" class="form-control" style="font-weight: bold; border: 2px solid #333; border-radius: 6px;">
+                <option value="kn" selected>Kannada (ಕನ್ನಡ)</option>
+                <option value="en">English</option>
+                <option value="hi">Hindi (हिंदी)</option>
+                <option value="bn">Bengali (বাংলা)</option>
+                <option value="ta">Tamil (தமிழ்)</option>
+                <option value="te">Telugu (తెలుగు)</option>
+                <option value="ml">Malayalam (മലയാളം)</option>
+                <option value="mr">Marathi (मराठी)</option>
+                <option value="gu">Gujarati (ગુજરાતી)</option>
+                <option value="pa">Punjabi (ਪੰਜਾਬੀ)</option>
+                <option value="ur">Urdu (اردو)</option>
+                <option value="es">Spanish (Español)</option>
+                <option value="fr">French (Français)</option>
+                <option value="de">German (Deutsch)</option>
+              </select>
+            </div>
+
+            <div class="form-group mt-3">
+              <label for="pdf_file" style="font-weight: bold;">Or upload document(s) (PDF, DOCX, TXT, Image):</label>
+              <input type="file" class="form-control-file" id="pdf_file" name="pdf_file" multiple accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" style="font-weight: bold; border: 2px solid #333; border-radius: 6px; padding: 6px;">
+            </div>
+            
+            <button class="btn btn-primary sub mt-3" type="submit" style="font-weight: bold; border-radius: 8px; font-size: 1.1rem;">Submit</button>
+          </form>
+        </div>
+      </div>
+      <div class="ad">
+        <p>Space for ads</p>
+      </div>
+    </div>
+    <script
+      src="https://code.jquery.com/jquery-3.2.1.slim.min.js"
+      integrity="sha384-KJ302DKtIkVVIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"
+      integrity="sha384-Aplibgh9B+Y1QKtv3Rn7w3mgPxhU9K/ScQsAP7hU1bX39J7fakFPskvXusvfa@b4Q"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+      integrity="sha384-3ZR65pejh4U@2d8j0t6vLEHfe/3QG1RRSQQxSfFwp11MquVdAyjuar5+76PVCmY1"
+      crossorigin="anonymous"
+    ></script>
+  </body>
+</html>

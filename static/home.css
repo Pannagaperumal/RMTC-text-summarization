@@ -1,0 +1,38 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f4f4f9;
+    text-align: center;
+    /* Centers all text in the body */
+}
+
+header {
+    background-color: #6200ea;
+    color: white;
+    padding: 30px 0;
+    /* Adds padding to the header */
+    font-size: 1.8em;
+    /* Sets a slightly larger font size for the header */
+}
+
+main {
+    margin: 50px auto;
+    max-width: 600px;
+    background: white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    /* Adds padding around the main content */
+    border-radius: 8px;
+    font-size: 1.2em;
+    /* Sets a medium font size for readability */
+}
+
+h1,
+h2 {
+    margin: 10px 0;
+}
+
+p {
+    margin: 20px 0;
+}

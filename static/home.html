@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aok/XA+B58RXPxPg6fy4IwvTNh@E263XmFc315Aw1GgFAW/dA1563Xm" crossorigin="anonymous" />
+    <link rel="stylesheet" href="static/styles.css" />
+    <style>
+        .diagram {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+        }
+        
+        .diagram img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="bg-primary text-white text-center p-4">
+        <h1>Welcome to the Text Summarization App</h1>
+    </header>
+    <main class="container mt-5">
+        <!-- Explanation of Summarization -->
+        <section>
+            <h2 class="text-center">What is Summarization?</h2>
+            <p class="text-center">Summarization is the process of condensing a text to its essential points while retaining its meaning. There are two main types:</p>
+            <div class="row mt-4">
+                <div class="col-md-6">
+                    <h3 class="text-center">Abstractive Summarization</h3>
+                    <p>Abstractive summarization generates a summary that may contain new phrases and sentences not present in the original text. It interprets and paraphrases the content.</p>
+                </div>
+                <div class="col-md-6">
+                    <h3 class="text-center">Extractive Summarization</h3>
+                    <p>Extractive summarization selects important sentences or phrases directly from the original text, presenting them as the summary without changes.</p>
+                </div>
+            </div>
+            <div class="diagram">
+                <img src="static/summarization_diagram.png" alt="Abstractive vs Extractive Summarization Diagram" />
+            </div>
+        </section>
+
+        <!-- Hybrid Text Summarization -->
+        <section class="mt-5">
+            <h2 class="text-center">Why Hybrid Text Summarization?</h2>
+            <p>
+                Hybrid text summarization combines the strengths of both **Abstractive** and **Extractive Summarization** techniques. It uses the extractive approach to identify important sentences or phrases and the abstractive approach to rephrase and rewrite content
+                for improved coherence and conciseness.
+            </p>
+            <p>
+                This hybrid approach ensures a summary that is both accurate (by extracting essential points) and natural (by paraphrasing for fluency).
+            </p>
+        </section>
+
+        <!-- Navigation Button -->
+        <section class="text-center mt-5">
+            <a href="templates/index.html" class="btn btn-primary btn-lg">Go to Index Page</a>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center mt-5 py-3 bg-light">
+        <p>&copy; 2024 Text Summarization App</p>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ302DKtIkVVIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-Aplibgh9B+Y1QKtv3Rn7w3mgPxhU9K/ScQsAP7hU1bX39J7fakFPskvXusvfa@b4Q" crossorigin="anonymous"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-3ZR65pejh4U@2d8j0t6vLEHfe/3QG1RRSQQxSfFwp11MquVdAyjuar5+76PVCmY1" crossorigin="anonymous"></script>
+</body>
+
+</html>
