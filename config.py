@@ -49,6 +49,13 @@ LIGHTWEIGHT_MODE = _bool('LIGHTWEIGHT_MODE', False)
 ENABLE_ONLINE_TRANSLATION = _bool('ENABLE_ONLINE_TRANSLATION', True)
 # Allow /api/tts to synthesize speech with gTTS (needs internet).
 ENABLE_ONLINE_TTS = _bool('ENABLE_ONLINE_TTS', True)
+# int8-quantize the translation model on CPU (about 2x faster, same quality in tests).
+QUANTIZE_TRANSLATION = _bool('QUANTIZE_TRANSLATION', True)
+# Beam size for the translation model. In tests 2 cost about the same as greedy (1)
+# and fixed its word errors; 4 was slightly better again but about twice as slow.
+TRANSLATION_BEAMS = max(1, _int('TRANSLATION_BEAMS', 2))
+# Load the models in the background when the server starts.
+PRELOAD_MODELS = _bool('PRELOAD_MODELS', True)
 DEFAULT_LANGUAGE = os.environ.get('DEFAULT_LANGUAGE', 'kn')
 DEFAULT_SUMMARY_MODE = os.environ.get('DEFAULT_SUMMARY_MODE', 'balanced')
 # Optional: where Hugging Face caches downloaded models (standard HF variable).

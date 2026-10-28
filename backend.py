@@ -16,6 +16,8 @@ import os
 import re
 import sys
 import threading
+import time
+import warnings
 from dataclasses import dataclass, field
 
 import config
@@ -111,8 +113,10 @@ except Exception:
 
 try:
     from deep_translator import GoogleTranslator
+    from deep_translator.exceptions import TooManyRequests
 except Exception:
     GoogleTranslator = None
+    TooManyRequests = None
 
 if _TORCH_AVAILABLE:
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -128,7 +132,7 @@ _MODE_ALIASES = {
 # Model names (overridable via environment, see .env.example)
 SUMMARIZER_MODEL = os.environ.get('SUMMARIZER_MODEL', 'facebook/bart-large-cnn')
 EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'paraphrase-multilingual-MiniLM-L12-v2')
-MULTILINGUAL_MODEL = os.environ.get('MULTILINGUAL_MODEL', 'facebook/mbart-large-50-many-to-many-mmt')
+MULTILINGUAL_MODEL = os.environ.get('MULTILINGUAL_MODEL', 'facebook/nllb-200-distilled-600M')
 TO_ENGLISH_MODEL = 'Helsinki-NLP/opus-mt-mul-en'
 
 # English -> target Marian models: (model id, required target-language prefix token).
@@ -151,7 +155,19 @@ _MARIAN_FROM_EN = {
     'ne': ('Helsinki-NLP/opus-mt-en-inc', '>>npi<<'),
 }
 
-# Language codes for the multilingual fallback model.
+# Kannada, Telugu and Tamil: opus-mt-mul-en invents unrelated English for them
+# and mBART-50 lacks Kannada and mixes scripts in Telugu, so these languages go
+# NLLB -> Google -> Marian (English -> language only).
+_NLLB_FIRST = {'kn', 'ta', 'te'}
+
+# Unicode blocks used to recognise these scripts before statistical detection.
+_SCRIPT_RANGES = {
+    'kn': ('\u0c80', '\u0cff'),
+    'te': ('\u0c00', '\u0c7f'),
+    'ta': ('\u0b80', '\u0bff'),
+}
+
+# Language codes for the multilingual model.
 # mBART-50 has no Kannada, Punjabi or Odia; NLLB-200 covers all of them.
 _MBART50_CODES = {
     'en': 'en_XX', 'hi': 'hi_IN', 'bn': 'bn_IN', 'gu': 'gu_IN', 'ml': 'ml_IN',
@@ -164,6 +180,19 @@ _NLLB_CODES = {
     'pa': 'pan_Guru', 'ta': 'tam_Taml', 'te': 'tel_Telu', 'ur': 'urd_Arab',
     'ne': 'npi_Deva', 'es': 'spa_Latn', 'fr': 'fra_Latn', 'de': 'deu_Latn',
 }
+
+# Text the translators must not touch: URLs, emails, @handles, phone numbers.
+# They are swapped for [[n]] placeholders, which NLLB copies through unchanged.
+_PROTECTED = re.compile(
+    r'(?:https?://|www\.)\S+?(?=[.,;:!?)\]]*(?:\s|$))'
+    r'|[\w.+-]+@[\w-]+(?:\.[\w-]+)+'
+    r'|(?<![\w@])@\w+'
+    r'|\+?\d[\d -]{7,}\d')
+
+# Non-English documents with more sentences than this are cut down to their most
+# central ones (TF-IDF in the source language) before translation to English,
+# which otherwise costs 1-3 s per sentence on CPU.
+_PRESELECT_SENTENCES = 40
 
 # Token budgets for model-based translation chunks (Marian max input is 512).
 _MT_CHUNK_TOKENS = 400
@@ -196,6 +225,12 @@ _EMBED_LOADED = False
 _ABSTR = None           # (model, tokenizer) or False once loading failed
 _MARIAN = {}            # model id -> (model, tokenizer) or None once loading failed
 _MULTI = None           # (model, tokenizer) or False once loading failed
+
+# Sentence-level translation cache: (src, tgt, chunk) -> translation. Saves
+# re-translating the summary inside the explanation, and repeat requests.
+_TRANSLATION_CACHE = collections.OrderedDict()
+_CACHE_LOCK = threading.Lock()
+_CACHE_SIZE = 5000
 
 
 class ExtractionError(Exception):
@@ -302,6 +337,8 @@ def _load_multilingual():
                 if DEVICE is not None:
                     model.to(DEVICE)
                 model.eval()
+                if config.QUANTIZE_TRANSLATION and DEVICE is not None and DEVICE.type == 'cpu':
+                    model = _quantize_int8(model)
                 _MULTI = (model, tokenizer)
             except Exception as e:
                 log.warning("Multilingual model %s failed to load: %s", MULTILINGUAL_MODEL, e)
@@ -309,8 +346,31 @@ def _load_multilingual():
     return _MULTI or None
 
 
+def _quantize_int8(model):
+    """int8 dynamic quantization of Linear layers: about 2x faster on CPU.
+
+    Only used for the translation model; BART produces nonsense when quantized.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')  # torch deprecation notice for the eager API
+        return torch.ao.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+
+
+def preload_models():
+    """Load every model the pipeline uses, so the first request is not slow."""
+    start = time.perf_counter()
+    _load_embedding_model()
+    _load_abstractive_model()
+    _load_multilingual()
+    log.info("Models ready after %.0f s", time.perf_counter() - start)
+
+
+def _multilingual_is_nllb():
+    return 'nllb' in MULTILINGUAL_MODEL.lower()
+
+
 def _multilingual_codes():
-    return _NLLB_CODES if 'nllb' in MULTILINGUAL_MODEL.lower() else _MBART50_CODES
+    return _NLLB_CODES if _multilingual_is_nllb() else _MBART50_CODES
 
 
 # ---------------------------------------------------------------------------
@@ -376,23 +436,49 @@ def _join_chunks(chunks):
     return out.strip()
 
 
-def _translate_chunks(text, translate_batch, measure, limit, per_sentence=False, batch_size=1):
+def _cache_get(key):
+    with _CACHE_LOCK:
+        value = _TRANSLATION_CACHE.get(key)
+        if value is not None:
+            _TRANSLATION_CACHE.move_to_end(key)
+        return value
+
+
+def _cache_put(key, value):
+    with _CACHE_LOCK:
+        _TRANSLATION_CACHE[key] = value
+        _TRANSLATION_CACHE.move_to_end(key)
+        while len(_TRANSLATION_CACHE) > _CACHE_SIZE:
+            _TRANSLATION_CACHE.popitem(last=False)
+
+
+def _translate_chunks(text, translate_batch, measure, limit, per_sentence=False, batch_size=1,
+                      cache_key=None):
     """Translate text chunk-by-chunk. Returns None if any chunk fails.
 
     translate_batch receives a list of up to batch_size chunks and returns a
-    list of translations in the same order.
+    list of translations in the same order. With cache_key (src, tgt), chunks
+    already translated are reused and each distinct chunk is translated once.
     """
     chunks = _chunk_text(text, measure, limit, per_sentence=per_sentence)
-    todo = [i for i, c in enumerate(chunks) if not _is_break(c)]
-    out = list(chunks)
-    for start in range(0, len(todo), batch_size):
-        idx = todo[start:start + batch_size]
-        translated = translate_batch([chunks[i] for i in idx])
-        if not translated or len(translated) != len(idx) or not all(translated):
+    done = {}
+    for c in chunks:
+        if not _is_break(c) and cache_key:
+            hit = _cache_get(cache_key + (c,))
+            if hit:
+                done[c] = hit
+    # Similar lengths in a batch mean less padding.
+    pending = sorted({c for c in chunks if not _is_break(c) and c not in done}, key=len)
+    for start in range(0, len(pending), batch_size):
+        batch = pending[start:start + batch_size]
+        translated = translate_batch(batch)
+        if not translated or len(translated) != len(batch) or not all(translated):
             return None
-        for i, t in zip(idx, translated):
-            out[i] = t
-    return _join_chunks(out)
+        for c, t in zip(batch, translated):
+            done[c] = t
+            if cache_key:
+                _cache_put(cache_key + (c,), t)
+    return _join_chunks([c if _is_break(c) else done[c] for c in chunks])
 
 
 def _generate(model, tokenizer, texts, **gen_kwargs):
@@ -406,6 +492,8 @@ def _generate(model, tokenizer, texts, **gen_kwargs):
 
 def _translate_marian(text, src_lang, tgt_lang):
     if tgt_lang == 'en':
+        if src_lang in _NLLB_FIRST:
+            return None
         model_id, prefix = TO_ENGLISH_MODEL, None
     elif src_lang == 'en' and tgt_lang in _MARIAN_FROM_EN:
         model_id, prefix = _MARIAN_FROM_EN[tgt_lang]
@@ -423,7 +511,8 @@ def _translate_marian(text, src_lang, tgt_lang):
         # One sentence per input: Marian is trained on sentence pairs and drops
         # content when given several sentences at once.
         return _translate_chunks(text, batch, lambda s: len(tokenizer.tokenize(s)), _MT_CHUNK_TOKENS,
-                                 per_sentence=True, batch_size=_MT_BATCH_SIZE)
+                                 per_sentence=True, batch_size=_MT_BATCH_SIZE,
+                                 cache_key=(model_id, src_lang, tgt_lang))
     except Exception as e:
         log.warning("Marian %s->%s failed: %s", src_lang, tgt_lang, e)
         return None
@@ -446,11 +535,13 @@ def _translate_multilingual(text, src_lang, tgt_lang):
         # src_lang lives on the shared tokenizer; hold the lock across set + encode.
         with _MULTI_LOCK:
             tokenizer.src_lang = src_tag
-            return _generate(model, tokenizer, chunks, forced_bos_token_id=forced_id)
+            return _generate(model, tokenizer, chunks, forced_bos_token_id=forced_id,
+                             num_beams=config.TRANSLATION_BEAMS)
 
     try:
         return _translate_chunks(text, batch, lambda s: len(tokenizer.tokenize(s)), _MT_CHUNK_TOKENS,
-                                 per_sentence=True, batch_size=_MT_BATCH_SIZE)
+                                 per_sentence=True, batch_size=_MT_BATCH_SIZE,
+                                 cache_key=(MULTILINGUAL_MODEL, src_lang, tgt_lang))
     except Exception as e:
         log.warning("%s %s->%s failed: %s", MULTILINGUAL_MODEL, src_lang, tgt_lang, e)
         return None
@@ -464,24 +555,66 @@ def _translate_online(text, src_lang, tgt_lang):
     except Exception:
         translator = GoogleTranslator(source='auto', target=tgt_lang)
 
+    def translate(chunk):
+        try:
+            return translator.translate(chunk)
+        except Exception as e:
+            if TooManyRequests is None or not isinstance(e, TooManyRequests):
+                raise
+            time.sleep(2)  # Google allows ~5 requests/second; retry once
+            return translator.translate(chunk)
+
     try:
-        return _translate_chunks(text, lambda chunks: [translator.translate(c) for c in chunks],
-                                 len, _ONLINE_CHUNK_CHARS)
+        return _translate_chunks(text, lambda chunks: [translate(c) for c in chunks],
+                                 len, _ONLINE_CHUNK_CHARS, cache_key=('google', src_lang, tgt_lang))
     except Exception as e:
         log.warning("Online translation %s->%s failed: %s", src_lang, tgt_lang, e)
         return None
 
 
-def _translate_text(text, src_lang, tgt_lang):
-    """Translate text, trying Marian, then the multilingual model, then Google.
+def _translation_backends(src_lang, tgt_lang):
+    if src_lang in _NLLB_FIRST or tgt_lang in _NLLB_FIRST:
+        if _multilingual_is_nllb():
+            return (_translate_multilingual, _translate_online, _translate_marian)
+        return (_translate_online, _translate_marian)
+    return (_translate_marian, _translate_multilingual, _translate_online)
 
-    Returns the translation, the original text when src == tgt, or None when
-    every backend failed.
+
+def _protect(text):
+    """Replace URLs, emails, handles and phone numbers with [[n]] placeholders."""
+    found = []
+
+    def placeholder(m):
+        found.append(m.group(0))
+        return f"[[{len(found) - 1}]]"
+    return _PROTECTED.sub(placeholder, text), found
+
+
+def _restore(text, found):
+    """Undo _protect; None if the translator dropped or duplicated a placeholder."""
+    for i, value in enumerate(found):
+        tag = f"[[{i}]]"
+        if text.count(tag) != 1:
+            return None
+        text = text.replace(tag, value)
+    return text
+
+
+def _translate_text(text, src_lang, tgt_lang):
+    """Translate text with the best available backend for the language pair.
+
+    Usually Marian, then the multilingual model, then Google; see _NLLB_FIRST
+    for the exceptions. Returns the translation, the original text when
+    src == tgt, or None when every backend failed.
     """
     if not text or not text.strip() or src_lang == tgt_lang:
         return text
-    for backend in (_translate_marian, _translate_multilingual, _translate_online):
-        result = backend(text, src_lang, tgt_lang)
+    masked, protected = _protect(text)
+    for backend in _translation_backends(src_lang, tgt_lang):
+        result = backend(masked, src_lang, tgt_lang)
+        if result and protected:
+            # Placeholder lost: translate unmasked (unchanged sentences hit the cache).
+            result = _restore(result, protected) or backend(text, src_lang, tgt_lang)
         if result:
             return result
     return None
@@ -624,6 +757,24 @@ def _frequency_selector(sentences, top_k):
     return chosen, {i: scores[i] / top for i in chosen}
 
 
+def _preselect(sentences, limit):
+    """Indices of up to `limit` central, diverse sentences, chosen without translating.
+
+    TF-IDF on whitespace tokens works for any script, unlike the embedding
+    model, which was not trained on Kannada, Telugu or Tamil.
+    """
+    if len(sentences) <= limit or TfidfVectorizer is None or np is None:
+        return list(range(len(sentences)))
+    try:
+        vectors = TfidfVectorizer(token_pattern=r"[^\s\d.,;:!?()\[\]\"'\u0964]+",
+                                  max_features=4096).fit_transform(sentences).toarray()
+    except ValueError:
+        return list(range(len(sentences)))
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return _hybrid_selector(vectors / norms, limit)[0]
+
+
 def _extract_keywords(text, top_n=10):
     words = [w.lower() for w in re.findall(r"[^\W\d_]{3,}", text)]
     filtered = [w for w in words if w not in STOPWORDS]
@@ -636,6 +787,11 @@ def _detect_language(text):
     letters = re.findall(r"[^\W\d_]", sample)
     if not letters:
         return 'en'
+    # Script-based detection is exact; langdetect can fall below its confidence
+    # threshold on Kannada/Telugu/Tamil text that mixes in English words.
+    for lang, (lo, hi) in _SCRIPT_RANGES.items():
+        if sum(1 for ch in letters if lo <= ch <= hi) / len(letters) > 0.3:
+            return lang
     ascii_ratio = sum(1 for ch in letters if ch.isascii()) / len(letters)
     # Short Latin-script snippets are routinely misdetected (e.g. as 'af' or 'so').
     if ascii_ratio > 0.9 and len(sample) < 200:
@@ -728,7 +884,7 @@ def _build_explanation(sentences, selected, scores, summary, mode):
     total = len(sentences)
     if mode == 'simple':
         points = '; '.join(clip(sentences[i]) for i in selected[:3])
-        return f"The main points are: {points}\n\nShort summary: {summary}"
+        return f"The main points are: {points}\n\nShort summary:\n{summary}"
 
     if mode == 'detailed':
         lines = [f"{len(selected)} of {total} sentences were selected as the most representative "
@@ -773,8 +929,14 @@ def summarize(text, language='en', explain=False, summary_mode=None):
     # working_lang is the language of processing_text (and so of the raw summary).
     processing_text = original_text
     working_lang = source_lang
+    n_source_sentences = 0
     if source_lang != 'en':
-        translated = _translate_text(original_text, source_lang, 'en')
+        source_sentences = _split_sentences(original_text)
+        n_source_sentences = len(source_sentences)
+        keep = _preselect(source_sentences, _PRESELECT_SENTENCES)
+        to_translate = (original_text if len(keep) == n_source_sentences
+                        else ' '.join(source_sentences[i] for i in keep))
+        translated = _translate_text(to_translate, source_lang, 'en')
         if translated:
             processing_text = translated
             working_lang = 'en'
@@ -787,7 +949,8 @@ def summarize(text, language='en', explain=False, summary_mode=None):
     if not sentences:
         return result
 
-    settings = _mode_settings(mode, len(sentences))
+    # Size the summary by the whole document, even when only part was translated.
+    settings = _mode_settings(mode, max(len(sentences), n_source_sentences))
     if language != 'en':
         # Translation compresses detail, so keep a little more source material.
         settings['top_k'] = min(len(sentences), max(settings['top_k'], int(settings['top_k'] * 1.5) + 1))

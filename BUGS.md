@@ -40,6 +40,7 @@
 | 27 | ✅ | Tests are hermetic (lightweight mode, mocked translation) with specific regression tests |
 | 28 | ✅ | Unused JS/CSS removed; `OFFLINE_ONLY` replaced by `LIGHTWEIGHT_MODE`; explanation shows real relevance scores |
 | 29 | ✅ | Translation model tables rebuilt from models verified to exist on the Hub (see below) |
+| 30 | ✅ | Kannada/Telugu/Tamil routed to NLLB-200 first; `opus-mt-mul-en` no longer used for them (see below) |
 
 ### 29. 🔴 Most offline translation models didn't exist (found while fixing #14)
 **`backend.py` `_get_marian_model` / `_MBART_LANG_MAP` (original code)**
@@ -54,6 +55,22 @@ Every request for those languages silently depended on Google Translate.
 **Fix:** Kannada, Tamil and Telugu now use `opus-mt-en-dra` (`>>kan<<`, `>>tam<<`, `>>tel<<`). Bengali, Gujarati,
 Punjabi, Odia and Nepali use `opus-mt-en-inc`, and any language → English uses `opus-mt-mul-en`. The
 multilingual fallback is configurable (mBART-50 by default; NLLB-200 also supported, covering every language).
+
+### 30. 🔴 Kannada, Telugu and Tamil input was summarized from made-up English (found 2026-10-28)
+**`backend.py` `_translate_text`**
+
+Tested with the real models. Marian was always tried first, and `opus-mt-mul-en` turned
+Kannada, Telugu and Tamil into unrelated English. Because the output wasn't empty, it was
+accepted, and the summary described content that wasn't in the document. Examples:
+- Kannada, about drought and crop yields → *"In the United States, the number of people who live in the United States…"*
+- Tamil, same content → *"According to a report published by the U.S. The king has announced…"*
+
+mBART-50 (the configured fallback) has no Kannada and mixed Malayalam script into Telugu.
+
+**Fix:** NLLB-200 is now the default `MULTILINGUAL_MODEL`. For kn/te/ta it is tried first, then
+Google, then Marian (English → language only). Script-based detection was added for these three
+languages, and a Google rate-limit error now gets one retry. `run_translation_test.py` runs all 16
+en/kn/te/ta input→output pairs through `summarize()` with the real models. All 16 pass.
 
 ---
 

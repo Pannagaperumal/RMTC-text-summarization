@@ -1,8 +1,10 @@
 import functools
 import io
 import logging
+import os
 import secrets
 import sys
+import threading
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -290,6 +292,9 @@ def text_to_speech():
 if __name__ == '__main__':
     url = f"http://{config.HOST}:{config.PORT}/index"
     print(f"Starting Text Summarization App on {url}")
+    # The debug reloader runs this block twice; load models only in the serving child.
+    if config.PRELOAD_MODELS and (not config.DEBUG or os.environ.get('WERKZEUG_RUN_MAIN') == 'true'):
+        threading.Thread(target=backend.preload_models, name='preload-models', daemon=True).start()
     if config.OPEN_BROWSER:
         import webbrowser
         from threading import Timer

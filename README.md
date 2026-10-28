@@ -91,7 +91,7 @@ You don't need to activate the virtual environment, because `uv run` uses it aut
 | Install | Summaries | Translation | Disk |
 |---|---|---|---|
 | `uv sync` | Extractive (TF-IDF + MMR) | Google Translate only (needs internet) | ~150 MB |
-| `uv sync --extra ml` | Hybrid: MiniLM selection + BART rewrite | Offline Marian / mBART models, Google as fallback | ~3 GB packages + ~5 GB models |
+| `uv sync --extra ml` | Hybrid: MiniLM selection + BART rewrite | Offline NLLB-200 / Marian models, Google as fallback | ~3 GB packages + ~5 GB models |
 
 > **GPU:** On Linux, PyPI's `torch` wheel includes CUDA support, and a GPU is used automatically
 > when present. On Windows and macOS it is CPU-only (or Apple MPS). Expect tens of seconds per long document on CPU.
@@ -170,7 +170,9 @@ The most important ones:
 | `ENABLE_ONLINE_TRANSLATION` | `true` | Google Translate fallback. **Sends document text to Google.** |
 | `ENABLE_ONLINE_TTS` | `true` | Google TTS for read-aloud. |
 | `DEFAULT_LANGUAGE` / `DEFAULT_SUMMARY_MODE` | `kn` / `balanced` | Form defaults. |
-| `MULTILINGUAL_MODEL` | mBART-50 | Fallback translator (NLLB-200 is better for Indic but non-commercial). |
+| `MULTILINGUAL_MODEL` | NLLB-200 | Main translator for Kannada/Telugu/Tamil. **CC-BY-NC (non-commercial).** Set mBART-50 for commercial use; kn/te/ta then rely on Google. |
+| `QUANTIZE_TRANSLATION` / `TRANSLATION_BEAMS` | `true` / `2` | Translation speed vs quality on CPU. See [Speed](docs/ARCHITECTURE.md#speed-cpu). |
+| `PRELOAD_MODELS` | `true` | Load models in the background at startup so the first request is not slow. |
 | `MAX_UPLOAD_MB` | `20` | Request size limit. |
 | `PDF_FONT_DIR` | empty | Extra folder searched for TTF fonts. |
 

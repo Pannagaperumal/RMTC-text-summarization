@@ -189,8 +189,20 @@ O(k·n) work per document.
 Backends are tried in order until one succeeds:
 
 1. **Marian** (Helsinki-NLP): a dedicated model per language pair (see table).
-2. **Multilingual model** (`MULTILINGUAL_MODEL`): mBART-50 by default, or NLLB-200.
+2. **Multilingual model** (`MULTILINGUAL_MODEL`): NLLB-200 by default, or mBART-50.
 3. **Google Translate** via `deep-translator`, if `ENABLE_ONLINE_TRANSLATION` is on.
+   A rate-limit error is retried once after a short pause.
+
+**Kannada, Telugu and Tamil** (`_NLLB_FIRST`) use a different order: NLLB-200 →
+Google → Marian (English → language only). Tested on real text, `opus-mt-mul-en`
+returned unrelated English for all three (for example *"In the United States…"* for a
+Kannada sentence about farmers). mBART-50 has no Kannada and mixed Malayalam script
+into Telugu. If `MULTILINGUAL_MODEL` is mBART-50, these languages skip it and start
+with Google.
+
+Language detection first checks for Kannada, Telugu or Tamil script (more than 30% of
+letters). Only after that does it use `langdetect`, which can fall below its
+confidence threshold on text that mixes in English words.
 
 If all fail, `None` is returned and `summarize()` adds a warning instead of failing.
 Identical source and target languages skip translation.
@@ -209,7 +221,7 @@ tried for the whole text.
 | Bengali `bn` / Gujarati `gu` | `opus-mt-en-inc` `>>ben<<` / `>>guj<<` | ✓ | ✓ |
 | Punjabi `pa` | `opus-mt-en-inc` `>>pan_Guru<<` | ✗ | `pan_Guru` |
 | Spanish / French / German | `opus-mt-en-{es,fr,de}` | ✓ | ✓ |
-| any → English | `opus-mt-mul-en` | ✓ (listed languages) | ✓ |
+| any → English | `opus-mt-mul-en` (not used for kn/te/ta) | ✓ (listed languages) | ✓ |
 
 ---
 
@@ -219,6 +231,23 @@ tried for the whole text.
 - `_LOAD_LOCK` stops concurrent first requests from loading the same multi-GB model twice.
 - The multilingual tokenizer's `src_lang` is shared state, so setting it and encoding happen under `_MULTI_LOCK`.
 - Each WSGI worker process holds its own copy of the models. Size the worker count to your RAM or GPU.
+- `python app.py` preloads every model in a background thread (`PRELOAD_MODELS`).
+
+## Speed (CPU)
+
+Measured on a 6-core CPU with no GPU. Translation is the slowest stage, at about 1–3 s per sentence.
+
+| Measure | Effect |
+|---|---|
+| int8 quantization of NLLB (`QUANTIZE_TRANSLATION`) | Translation about 2.7× faster (29 s → 11 s in an A/B test). Not used for BART, which outputs nonsense when quantized. |
+| Beam size 2 (`TRANSLATION_BEAMS`) | About the same cost as greedy, with fewer word errors (e.g. "heatwaves" no longer becomes "tropics"). Beam size 4 is about twice as slow. |
+| Sentence translation cache (`_TRANSLATION_CACHE`) | The summary repeated inside the explanation, and repeat requests, are not translated again. Each distinct sentence is translated once per request. |
+| Preselection (`_PRESELECT_SENTENCES = 40`) | Non-English documents longer than 40 sentences are cut down to the 40 most central ones (TF-IDF + MMR in the source language) before translation to English. 96 sentences: 127 s → 91 s; the saving grows with length. |
+
+URLs, emails, `@handles` and phone numbers are replaced by `[[n]]` placeholders before
+translation and restored afterwards (`_protect` / `_restore`); NLLB preserved this
+format in 12 of 12 test sentences. If a placeholder is lost, that text is translated
+unmasked instead.
 
 ---
 
